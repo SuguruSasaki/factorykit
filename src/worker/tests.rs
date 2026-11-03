@@ -4,6 +4,81 @@ use std::path::PathBuf;
 use super::*;
 use crate::github::Api;
 
+fn filler(prefix: &str, count: usize) -> String {
+    (0..count)
+        .map(|n| format!("{prefix} 日本語 line {n} padding padding padding\n"))
+        .collect()
+}
+
+/// Same shape as a real failure: failures in stdout, then a long build log in stderr.
+fn long_stderr_log() -> String {
+    let mut log = filler("out", 100);
+    log.push_str("test fake::broken ... FAILED\n");
+    log.push_str("thread 'fake::broken' panicked at src/fake.rs:1:1:\n");
+    log.push_str("assertion failed: fake\n");
+    log.push_str(&filler("out", 50));
+    log.push_str("Validation results: fmt=FAIL clippy=FAIL test=FAIL\n");
+    log.push_str("--- stderr ---\n");
+    log.push_str(&filler("   Compiling fake", 400));
+    log
+}
+
+#[test]
+fn repair_excerpt_keeps_failure_before_long_stderr() {
+    let log = long_stderr_log();
+    assert!(log.chars().count() > 10_000);
+    let (note, excerpt) = repair_excerpt(&log, 10_000);
+    assert!(excerpt.contains("fake::broken ... FAILED"));
+    assert!(excerpt.contains("panicked at src/fake.rs"));
+    assert!(excerpt.contains("Validation results:"));
+    assert!(excerpt.contains("Compiling fake 日本語 line 399"));
+    assert!(note.contains(&format!("{} lines", log.lines().count())));
+}
+
+#[test]
+fn repair_excerpt_keeps_fmt_clippy_and_test_failures() {
+    let mut log = filler("out", 100);
+    log.push_str("Diff in /fake/src/a.rs:1:\n-old\n+new\n");
+    log.push_str(&filler("out", 100));
+    log.push_str("error: fake clippy lint\n");
+    log.push_str(&filler("out", 100));
+    log.push_str("test fake::broken ... FAILED\n");
+    log.push_str(&filler("out", 100));
+    log.push_str("--- stderr ---\n");
+    log.push_str(&filler("   Compiling fake", 400));
+    let (_, excerpt) = repair_excerpt(&log, 10_000);
+    assert!(excerpt.contains("Diff in /fake/src/a.rs"));
+    assert!(excerpt.contains("error: fake clippy lint"));
+    assert!(excerpt.contains("fake::broken ... FAILED"));
+}
+
+#[test]
+fn repair_excerpt_without_markers_is_the_tail() {
+    let log = filler("plain", 1000);
+    let (_, excerpt) = repair_excerpt(&log, 10_000);
+    let expected: Vec<char> = log.chars().collect();
+    let expected: String = expected[expected.len() - 10_000..].iter().collect();
+    assert_eq!(excerpt, expected);
+}
+
+#[test]
+fn repair_excerpt_respects_limit_and_marks_omissions() {
+    let log = long_stderr_log();
+    for limit in [0, 50, 500, 3_000, 10_000] {
+        let (_, excerpt) = repair_excerpt(&log, limit);
+        assert!(excerpt.chars().count() <= limit, "limit {limit}");
+    }
+    let (_, excerpt) = repair_excerpt(&log, 10_000);
+    assert!(excerpt.contains("lines 1-"));
+    assert!(excerpt.contains(" omitted ...]"));
+}
+
+#[test]
+fn repair_excerpt_short_log_is_unchanged() {
+    let (_, excerpt) = repair_excerpt("a FAILED\n", 10_000);
+    assert_eq!(excerpt, "a FAILED\n");
+}
+
 fn issue_value() -> Value {
     json!({"number":7,"title":"Add greeting","body":"### 作業種別\nfeature\n### 目的\nGreet the user.\n### 対象範囲\nhello.txt only.\n### 期待する動作\nHello is present.\n### 完了条件\nThe file contains Hello.\n### 検証方法\nRead hello.txt.\n","state":"open","labels":[{"name":"ai-in-progress"}],"user":{"login":"owner","type":"User"}})
 }
