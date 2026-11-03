@@ -43,7 +43,7 @@ body:
     id: acceptance
     attributes:
       label: 完了条件
-      description: 合格を判断できる条件
+      description: 実行できる確認（入力・確かめるコマンドやテスト・期待する結果）で書く。機械で判定できない項目は「人が確認」と明記する
     validations:
       required: true
   - type: textarea
