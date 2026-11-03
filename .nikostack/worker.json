@@ -1,0 +1,31 @@
+{
+  "repository": "SuguruSasaki/nikostack",
+  "base": "main",
+  "model": "sonnet",
+  "review_model": "sonnet",
+  "protected_paths": [
+    ".agents/skills/rust-coding",
+    ".agents/skills/markdown-docs",
+    "docs/decisions"
+  ],
+  "checks": [
+    {
+      "name": "Markdown patch whitespace",
+      "argv": ["git", "diff", "--cached", "--check"],
+      "paths": ["*.md", "**/*.md"],
+      "timeout_seconds": 60
+    },
+    {
+      "name": "Rust static checks and tests",
+      "argv": ["./.agents/validate", "rust"],
+      "paths": [
+        "src/**",
+        "tests/**",
+        "Cargo.toml",
+        "Cargo.lock",
+        "skills/nikostack/**"
+      ],
+      "timeout_seconds": 1800
+    }
+  ]
+}
