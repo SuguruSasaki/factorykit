@@ -161,6 +161,9 @@ pub(crate) struct Issue {
     pub title: String,
     pub body: Option<String>,
     pub state: String,
+    /// `completed` or `not_planned` once closed.
+    #[serde(default)]
+    pub state_reason: Option<String>,
     pub labels: Vec<Label>,
     pub user: Actor,
 }
@@ -180,14 +183,10 @@ impl Issue {
     pub(crate) fn same_scope(&self, other: &Self) -> bool {
         self.title == other.title && self.body == other.body
     }
-    pub(crate) fn task_kind(&self) -> Result<TaskKind> {
-        let body = self.body.as_deref().unwrap_or_default();
-        if body.len() > 24_000 || self.title.chars().count() > 300 {
-            return Err(Error::blocked("Split the issue before approving it."));
-        }
+    fn sections(&self) -> BTreeMap<&str, String> {
         let mut sections: BTreeMap<&str, String> = BTreeMap::new();
         let mut heading = None;
-        for line in body.lines() {
+        for line in self.body.as_deref().unwrap_or_default().lines() {
             if let Some(name) = line
                 .strip_prefix("### ")
                 .or_else(|| line.strip_prefix("## "))
@@ -200,6 +199,55 @@ impl Issue {
                 content.push('\n');
             }
         }
+        sections
+    }
+    /// Issue numbers of this repository from the optional `前提` section.
+    /// A missing or empty section means no prerequisites.
+    pub(crate) fn prerequisites(&self) -> Result<Vec<u64>> {
+        let sections = self.sections();
+        let text = sections.get("前提").map(|s| s.trim()).unwrap_or_default();
+        if text.is_empty() || text == "_No response_" {
+            return Ok(Vec::new());
+        }
+        let mut numbers = Vec::new();
+        for token in text
+            .split(|c: char| c == ',' || c == '、' || c.is_whitespace())
+            .filter(|token| !token.is_empty())
+        {
+            let digits = token.strip_prefix('#').unwrap_or_default();
+            let number = if digits.bytes().all(|b| b.is_ascii_digit()) {
+                digits.parse::<u64>().ok().filter(|number| *number > 0)
+            } else {
+                None
+            };
+            let Some(number) = number else {
+                let shown: String = token.chars().take(40).collect();
+                return Err(Error::blocked(format!(
+                    "前提 must list issues of this repository like `#47, #48`; cannot use `{shown}`."
+                )));
+            };
+            if number == self.number {
+                return Err(Error::blocked(format!(
+                    "前提 lists the issue itself (#{number})."
+                )));
+            }
+            if !numbers.contains(&number) {
+                numbers.push(number);
+            }
+        }
+        if numbers.len() > 20 {
+            return Err(Error::blocked(
+                "前提 lists too many issues; split the work.",
+            ));
+        }
+        Ok(numbers)
+    }
+    pub(crate) fn task_kind(&self) -> Result<TaskKind> {
+        let body = self.body.as_deref().unwrap_or_default();
+        if body.len() > 24_000 || self.title.chars().count() > 300 {
+            return Err(Error::blocked("Split the issue before approving it."));
+        }
+        let sections = self.sections();
         for name in ["目的", "対象範囲", "期待する動作", "完了条件", "検証方法"]
         {
             let text = sections.get(name).map(|v| v.trim()).unwrap_or_default();
@@ -271,6 +319,42 @@ mod tests {
         assert!(matches("src/**", "src/日本語/file.rs"));
         assert!(matches("*.sh", "scripts/check.sh"));
         assert!(!matches("src/**", "docs/src.md"));
+    }
+    fn with_body(body: &str) -> Issue {
+        serde_json::from_value(serde_json::json!({
+            "number":7,"title":"task","body":body,
+            "state":"open","labels":[],"user":{"login":"owner","type":"User"}
+        }))
+        .expect("fixture")
+    }
+    #[test]
+    fn prerequisites_are_optional_and_strictly_parsed() {
+        let empty = [
+            "### 目的\nx\n",
+            "### 前提\n\n### 目的\nx\n",
+            "### 前提\n_No response_\n",
+        ];
+        for body in empty {
+            assert!(with_body(body).prerequisites().expect("none").is_empty());
+        }
+        assert_eq!(
+            with_body("### 前提\n#12, #13 #12\n### 目的\nx\n")
+                .prerequisites()
+                .expect("list"),
+            vec![12, 13]
+        );
+        let invalid = [
+            "owner/other#3",
+            "https://github.com/o/r/issues/3",
+            "12",
+            "#0",
+            "#7",
+            "see #3",
+        ];
+        for text in invalid {
+            let issue = with_body(&format!("### 前提\n{text}\n"));
+            assert!(issue.prerequisites().is_err(), "{text}");
+        }
     }
     #[test]
     fn issue_requires_observable_acceptance_and_kind() {
