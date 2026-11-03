@@ -36,7 +36,7 @@ The shared definitions are [issue-labels.json](../assets/issue-labels.json):
 | ai-ready | A person authorized the issue's stated scope. |
 | ai-in-progress | A worker claimed the task. Do not start another owner. |
 | ai-blocked | Work stopped. Inspect the reason before explicitly requeueing. |
-| ai-review | A report or draft PR awaits human review. |
+| ai-review | A report or PR was submitted. A PR with human-verify awaits a person's check of its behavior. Not permission to merge or update the app. |
 | human-verify | On an issue and its PR: a person runs behavior that machines cannot check, then merges. Not permission to update the app. |
 
 Label names are the worker's protocol in this version. Existing same-name
