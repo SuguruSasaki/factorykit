@@ -8,8 +8,8 @@ use crate::process::{Request, Runner};
 
 pub(crate) const STATES: [&str; 4] = ["ai-ready", "ai-in-progress", "ai-blocked", "ai-review"];
 
-/// PR label: factory work and checks are done; a person merges. Not approval to update the app.
-pub(crate) const HUMAN_MERGE: &str = "human-merge";
+/// Issue and PR label: a person runs behavior that machines cannot check, then merges. Not approval to update the app.
+pub(crate) const HUMAN_VERIFY: &str = "human-verify";
 
 /// Whether an issue's `前提` issues allow starting it.
 #[derive(Debug, PartialEq, Eq)]
@@ -313,16 +313,18 @@ impl Queue<'_> {
             node_id: string(&value, "node_id")?.to_owned(),
         })
     }
-    /// Mark a Draft PR as awaiting the human merge. The label goes first so a
-    /// failure leaves the PR in Draft; if switching to Ready then fails, the
-    /// label is withdrawn on a best-effort basis.
-    pub(crate) fn publish_pr(&self, pr: &PullRequest) -> Result<()> {
-        self.request(
-            "POST",
-            &format!("issues/{}/labels", pr.number),
-            Some(json!({"labels":[HUMAN_MERGE]})),
-            false,
-        )?;
+    /// Switch a Draft PR to Ready. When `human_verify` is set, the PR is first
+    /// labeled `human-verify` so a failure leaves it in Draft; if switching to
+    /// Ready then fails, the label is withdrawn on a best-effort basis.
+    pub(crate) fn publish_pr(&self, pr: &PullRequest, human_verify: bool) -> Result<()> {
+        if human_verify {
+            self.request(
+                "POST",
+                &format!("issues/{}/labels", pr.number),
+                Some(json!({"labels":[HUMAN_VERIFY]})),
+                false,
+            )?;
+        }
         let ready = self
             .api
             .request(
@@ -344,12 +346,14 @@ impl Queue<'_> {
                 }
             });
         if let Err(error) = ready {
-            let _ = self.request(
-                "DELETE",
-                &format!("issues/{}/labels/{HUMAN_MERGE}", pr.number),
-                None,
-                false,
-            );
+            if human_verify {
+                let _ = self.request(
+                    "DELETE",
+                    &format!("issues/{}/labels/{HUMAN_VERIFY}", pr.number),
+                    None,
+                    false,
+                );
+            }
             return Err(error);
         }
         Ok(())
@@ -510,7 +514,7 @@ mod tests {
             applied["created"]
                 .as_array()
                 .expect("array")
-                .contains(&json!("human-merge"))
+                .contains(&json!("human-verify"))
         );
         assert_eq!(api.labels.borrow()[0], original);
         assert_eq!(

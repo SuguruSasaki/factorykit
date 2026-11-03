@@ -339,6 +339,23 @@ impl Fixture {
             &mut json!({}),
         )
     }
+    /// Like `execute`, but the Issue carries `human-verify` both at the start
+    /// of processing and on the fake GitHub, so the scope check still compares
+    /// two independent copies.
+    fn execute_human_verify(&self) -> Result<Value> {
+        let mut value = issue_value();
+        value["labels"] = json!([{"name":"ai-in-progress"},{"name":"human-verify"}]);
+        *self.api.issue.borrow_mut() = value.clone();
+        let issue = serde_json::from_value(value).expect("issue");
+        self.worker().execute(
+            &issue,
+            TaskKind::Feature,
+            &self.job,
+            &self.work,
+            "ai/issue-7",
+            &mut json!({}),
+        )
+    }
     fn published(&self) -> bool {
         self.api
             .writes
@@ -380,12 +397,7 @@ fn successful_run_checks_reviews_and_pushes_only_its_branch() {
             .expect("body")
             .contains("Greeting contract | verified")
     );
-    assert!(
-        pr["body"]
-            .as_str()
-            .expect("body")
-            .contains("Read the greeting as a user.")
-    );
+    assert!(pr["body"].as_str().expect("body").contains("Not required"));
     assert_eq!(
         fixture.api.issue.borrow()["labels"],
         json!([{"name":"ai-review"}])
@@ -402,41 +414,102 @@ fn count_writes(fixture: &Fixture, endpoint: &str) -> usize {
         .count()
 }
 
+fn pr_labels(fixture: &Fixture) -> Vec<Value> {
+    fixture
+        .api
+        .writes
+        .borrow()
+        .iter()
+        .filter(|(endpoint, _)| endpoint.ends_with("issues/9/labels"))
+        .map(|(_, payload)| payload["labels"].clone())
+        .collect()
+}
+
+fn pr_body(fixture: &Fixture) -> String {
+    let writes = fixture.api.writes.borrow();
+    let (_, pr) = writes
+        .iter()
+        .find(|(endpoint, _)| endpoint.ends_with("/pulls"))
+        .expect("PR");
+    pr["body"].as_str().expect("body").to_owned()
+}
+
+fn last_issue_comment(fixture: &Fixture) -> String {
+    let writes = fixture.api.writes.borrow();
+    let (_, comment) = writes
+        .iter()
+        .rfind(|(endpoint, _)| endpoint.ends_with("issues/7/comments"))
+        .expect("comment");
+    comment["body"].as_str().expect("body").to_owned()
+}
+
 #[test]
-fn published_pr_is_marked_ready_and_labeled_once() {
+fn human_verify_issue_labels_pr_and_marks_it_ready_once() {
     let fixture = Fixture::new(Behavior::Good);
-    fixture.execute().expect("run");
+    fixture.execute_human_verify().expect("run");
     assert_eq!(count_writes(&fixture, "graphql"), 1);
     assert_eq!(count_writes(&fixture, "issues/9/labels"), 1);
+    assert_eq!(pr_labels(&fixture), vec![json!(["human-verify"])]);
     let writes = fixture.api.writes.borrow();
-    let (_, label) = writes
-        .iter()
-        .find(|(endpoint, _)| endpoint.ends_with("issues/9/labels"))
-        .expect("label");
-    assert_eq!(label["labels"], json!(["human-merge"]));
     let (_, ready) = writes
         .iter()
         .find(|(endpoint, _)| endpoint.ends_with("graphql"))
         .expect("ready");
     assert_eq!(ready["variables"]["id"], "PR_node");
+    drop(writes);
+    let body = pr_body(&fixture);
+    assert!(body.contains("Read the greeting as a user."));
+    assert!(body.contains("merge only after confirming"));
+    assert!(body.contains("not approval to update the application"));
+    assert!(last_issue_comment(&fixture).contains("not approval to update the application"));
+}
+
+#[test]
+fn issue_without_human_verify_gets_no_pr_label_but_is_marked_ready() {
+    let fixture = Fixture::new(Behavior::Good);
+    fixture.execute().expect("run");
+    assert_eq!(count_writes(&fixture, "graphql"), 1);
+    assert_eq!(count_writes(&fixture, "issues/9/labels"), 0);
+    let body = pr_body(&fixture);
+    assert!(body.contains("Not required"));
+    assert!(!body.contains("Read the greeting as a user."));
+    assert!(body.contains("not approval to update the application"));
+    let comment = last_issue_comment(&fixture);
+    assert!(comment.contains("No manual verification is needed"));
+    assert!(comment.contains("not approval to update the application"));
+}
+
+#[test]
+fn human_merge_is_never_applied() {
+    for verify in [true, false] {
+        let fixture = Fixture::new(Behavior::Good);
+        if verify {
+            fixture.execute_human_verify().expect("run");
+        } else {
+            fixture.execute().expect("run");
+        }
+        assert!(
+            !pr_labels(&fixture)
+                .iter()
+                .any(|labels| labels.to_string().contains("human-merge"))
+        );
+    }
 }
 
 #[test]
 fn label_failure_leaves_draft_and_explains_on_the_issue() {
     let fixture = Fixture::new(Behavior::Good);
     fixture.api.fail_pr_label.set(true);
-    assert_eq!(fixture.execute().expect("run")["status"], "pr-created");
+    assert_eq!(
+        fixture.execute_human_verify().expect("run")["status"],
+        "pr-created"
+    );
     assert_eq!(count_writes(&fixture, "graphql"), 0);
     assert_eq!(
         fixture.api.issue.borrow()["labels"],
-        json!([{"name":"ai-review"}])
+        json!([{"name":"human-verify"},{"name":"ai-review"}])
     );
-    let writes = fixture.api.writes.borrow();
-    let (_, comment) = writes
-        .iter()
-        .rfind(|(endpoint, _)| endpoint.ends_with("issues/7/comments"))
-        .expect("comment");
-    let text = comment["body"].as_str().expect("body");
+    let text = last_issue_comment(&fixture);
     assert!(text.contains("stays Draft") && text.contains("Simulated label failure"));
 }
 
