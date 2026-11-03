@@ -5,7 +5,7 @@
 
 ## Problem
 
-Nikostack aims to be a factory that produces products. People decide what to
+FactoryKit aims to be a factory that produces products. People decide what to
 build and verify behavior when needed; they no longer review code. Version 0.2
 still assumes human code review. The entry skill says passing checks do not
 replace human review, `ai-review` waits for a human reviewer, and the worker's
@@ -17,7 +17,7 @@ a queue of approved issues.
 
 ## Decision
 
-Nikostack, not a human reviewer, makes a change verifiable. A person writes the
+FactoryKit, not a human reviewer, makes a change verifiable. A person writes the
 specification and verifies behavior that the factory cannot check.
 
 ### Roles

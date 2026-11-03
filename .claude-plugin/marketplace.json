@@ -1,12 +1,12 @@
 {
-  "name": "nikostack",
-  "description": "Nikostack development workflows",
+  "name": "factorykit",
+  "description": "FactoryKit development workflows",
   "owner": {
     "name": "SuguruSasaki"
   },
   "plugins": [
     {
-      "name": "nikostack",
+      "name": "factorykit",
       "source": "./",
       "description": "Shared development workflow for Codex and Claude Code"
     }

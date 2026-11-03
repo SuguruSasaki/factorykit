@@ -21,19 +21,19 @@ maintain, or admin permission.
 
 ## Prepare
 
-First follow [project setup](../skills/nikostack/references/setup-project.md).
-The project owns .nikostack/worker.json. Set repository, base, checks, any
+First follow [project setup](../skills/factorykit/references/setup-project.md).
+The project owns .factorykit/worker.json. Set repository, base, checks, any
 extra protected_paths, and optional hooks_path. Each check is a name and argv
 array; optional paths selects affected files and timeout_seconds bounds the
 command. Do not put credentials or personal data in the configuration.
 
-Install once from the nikostack source checkout, then replace the product path:
+Install once from the factorykit source checkout, then replace the product path:
 
 ```sh
 cargo install --path . --locked
-nikostack worker --project /path/to/product --dry-run
-nikostack worker --project /path/to/product
-nikostack worker --project /path/to/product --watch
+factorykit worker --project /path/to/product --dry-run
+factorykit worker --project /path/to/product
+factorykit worker --project /path/to/product --watch
 ```
 
 Default mode handles at most one task. --watch polls every 120 seconds and
@@ -55,7 +55,7 @@ steps. Without installing globally, use `cargo run --locked -- worker ...`.
    adds ai-in-progress, removes ai-ready, and records a run and branch.
 3. It clones to a private run directory and starts from the remote base.
    The original development checkout is not changed.
-4. Claude reads the shared nikostack source plus product instructions and
+4. Claude reads the shared factorykit source plus product instructions and
    edits through file tools. Shell, GitHub, MCP, and subagent tools are absent.
    The controller runs the configured checks. One check-failure repair is
    allowed; repeated failure blocks the issue. The repair receives at most
@@ -78,7 +78,7 @@ steps. Without installing globally, use `cargo run --locked -- worker ...`.
    person merges after confirming the listed remaining checks. It is not
    permission to update the application. If the label or the switch fails,
    the PR stays Draft and the reason is commented on the issue, which is
-   still moved to ai-review. Merging stays with a person. `nikostack setup`
+   still moved to ai-review. Merging stays with a person. `factorykit setup`
    adds the `human-merge` label without changing existing labels.
 
 A review-only task uses read-only tools and reports findings without a PR.
@@ -147,7 +147,7 @@ and explicitly add ai-ready. Existing PRs go back to ai-review instead of
 creating a second PR. A pre-existing branch without a PR may require manual
 recovery; force-push is not used.
 
-Private state is under ~/.local/state/nikostack/owner__repo unless overridden
+Private state is under ~/.local/state/factorykit/owner__repo unless overridden
 (repository names are lowercased for locking).
 Each run retains its issue snapshot, base SHA, check logs for both attempts,
 AI outputs, and receipt. Permissions are private on creation; do not share

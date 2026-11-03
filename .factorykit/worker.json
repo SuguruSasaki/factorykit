@@ -1,5 +1,5 @@
 {
-  "repository": "SuguruSasaki/nikostack",
+  "repository": "SuguruSasaki/factorykit",
   "base": "main",
   "model": "sonnet",
   "review_model": "sonnet",
@@ -23,7 +23,7 @@
         "tests/**",
         "Cargo.toml",
         "Cargo.lock",
-        "skills/nikostack/**"
+        "skills/factorykit/**"
       ],
       "timeout_seconds": 1800
     }

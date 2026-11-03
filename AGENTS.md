@@ -1,6 +1,6 @@
-# Maintaining Nikostack
+# Maintaining FactoryKit
 
-`skills/nikostack/` is the single source for Codex and Claude Code. When changing the entry point, edit [SKILL.md](skills/nikostack/SKILL.md) and only the necessary references. Do not copy its content into `.agents/skills/` or `.claude/skills/`.
+`skills/factorykit/` is the single source for Codex and Claude Code. When changing the entry point, edit [SKILL.md](skills/factorykit/SKILL.md) and only the necessary references. Do not copy its content into `.agents/skills/` or `.claude/skills/`.
 
 Keep plugin manifests and marketplaces as thin distribution metadata. Do not duplicate the skill or product-specific instructions in them.
 

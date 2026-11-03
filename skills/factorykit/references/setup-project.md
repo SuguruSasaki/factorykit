@@ -1,24 +1,24 @@
 # Prepare a product project
 
-Run this procedure on first adoption of nikostack or when asked to prepare
+Run this procedure on first adoption of factorykit or when asked to prepare
 AI issue handling. Plugin installation distributes files; it does not execute
 GitHub writes. Keep this setup separate from ordinary feature work.
 
 ## Identify the target
 
 Read the product's instructions and confirm its GitHub OWNER/REPO. Use the
-product repository, not the nikostack repository, for product development
+product repository, not the factorykit repository, for product development
 issues. Verify that GitHub CLI is authenticated and Issues are enabled.
 
 ## Prepare shared labels
 
-Install the Rust CLI from a matching nikostack source checkout
+Install the Rust CLI from a matching factorykit source checkout
 (Rust 1.89 or newer is required), then prepare the product:
 
 ```sh
 cargo install --path . --locked
-nikostack setup --repository OWNER/REPO
-nikostack setup --repository OWNER/REPO --apply
+factorykit setup --repository OWNER/REPO
+factorykit setup --repository OWNER/REPO --apply
 ```
 
 After installation, the first setup command previews. `--apply` creates only
@@ -60,7 +60,7 @@ child's predecessors in its 前提 and do not put ai-ready on the parent issue:
 it is a tracking issue, not a task.
 
 If enabling the optional Mac worker, use [worker.example.json](../assets/worker.example.json)
-as the product's .nikostack/worker.json and configure actual argv-based checks.
+as the product's .factorykit/worker.json and configure actual argv-based checks.
 The empty check list is deliberately invalid until project checks are chosen.
 Commands, protected validator paths, and live-check requirements belong to the
 product. Follow the [worker guide](../../../docs/issue-worker.md) for a source

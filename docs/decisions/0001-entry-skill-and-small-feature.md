@@ -9,7 +9,7 @@ Recreating an agent's development procedure in each product weakens the link bet
 
 ## Decision and rationale
 
-Keep `skills/nikostack/` as the only Agent Skills source, with relative links from the Codex and Claude Code discovery locations. The entry skill routes feature, bug fix, and review requests. At this stage, provide a detailed procedure only for small feature changes. The entry skill requires agents to read the target project first, distinguish verification states, and consider delegation cost.
+Keep `skills/factorykit/` as the only Agent Skills source, with relative links from the Codex and Claude Code discovery locations. The entry skill routes feature, bug fix, and review requests. At this stage, provide a detailed procedure only for small feature changes. The entry skill requires agents to read the target project first, distinguish verification states, and consider delegation cost.
 
 Keep each product's Feature Map and operation commands in its own repository. Niko's `verify-niko` was consulted to confirm this boundary. Use the existing `ai-agent-coding-guide` for language-specific guidance rather than copying it here.
 

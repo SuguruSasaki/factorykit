@@ -1,11 +1,11 @@
 {
-  "name": "nikostack",
+  "name": "factorykit",
   "interface": {
-    "displayName": "Nikostack"
+    "displayName": "FactoryKit"
   },
   "plugins": [
     {
-      "name": "nikostack",
+      "name": "factorykit",
       "source": {
         "source": "local",
         "path": "./"

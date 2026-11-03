@@ -19,16 +19,16 @@ const PROTECTED: &[&str] = &[
     ".agents/skills/*/scripts/**",
     ".claude",
     ".githooks",
-    ".nikostack",
+    ".factorykit",
     "AGENTS.md",
     "CLAUDE.md",
     ".mcp.json",
     ".gitmodules",
 ];
 const SHARED: &str = concat!(
-    include_str!("../skills/nikostack/SKILL.md"),
+    include_str!("../skills/factorykit/SKILL.md"),
     "\n",
-    include_str!("../skills/nikostack/references/small-feature.md")
+    include_str!("../skills/factorykit/references/small-feature.md")
 );
 
 pub(crate) struct Worker<'a> {
@@ -124,7 +124,7 @@ impl Worker<'_> {
         let outcome = (|| {
             let kind = issue.task_kind()?;
             self.queue.transition(issue.number, "ai-in-progress")?;
-            self.queue.comment(issue.number,&format!("nikostack started `{}` on `{branch}`. Serial worker; no automatic merge or installation.",run_name(&job)))?;
+            self.queue.comment(issue.number,&format!("factorykit started `{}` on `{branch}`. Serial worker; no automatic merge or installation.",run_name(&job)))?;
             receipt["stage"] = json!("claimed");
             atomic_json(&job.join("receipt.json"), &receipt)?;
             let work = job.join("checkout");

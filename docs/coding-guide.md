@@ -1,6 +1,6 @@
 # Coding guide adoption
 
-Nikostack uses the Rust and Markdown skills from
+FactoryKit uses the Rust and Markdown skills from
 [SuguruSasaki/ai-agent-coding-guide](https://github.com/SuguruSasaki/ai-agent-coding-guide),
 installed from revision `0f7630e22480140fd49111300342bd0e26601245`.
 These are development rules for this repository; plugin installation does
@@ -15,7 +15,7 @@ The root [AGENTS.md](../AGENTS.md) selects applicable rules; Claude Code's
 point to the same skills. Edit or update the source once, rather than
 maintaining separate copies for each agent.
 
-The existing Nikostack entry skill remains at `skills/nikostack/`.
+The existing FactoryKit entry skill remains at `skills/factorykit/`.
 The imported guide is not a new runtime dependency.
 
 ## Validate a change
