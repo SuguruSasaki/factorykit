@@ -58,7 +58,13 @@ steps. Without installing globally, use `cargo run --locked -- worker ...`.
 4. Claude reads the shared nikostack source plus product instructions and
    edits through file tools. Shell, GitHub, MCP, and subagent tools are absent.
    The controller runs the configured checks. One check-failure repair is
-   allowed; repeated failure blocks the issue.
+   allowed; repeated failure blocks the issue. The repair receives at most
+   10,000 characters of the failed check's log: failure summary lines
+   (`Validation results:`, `test result: FAILED`), lines around `FAILED`,
+   `panicked at`, `error:`, `Diff in` and `warning:`, then the ends of stdout
+   and stderr. Omitted line ranges are marked, and the full log's line count
+   is stated. A log with no failure markers is passed as its last 10,000
+   characters.
 5. A fresh Claude session reviews the issue and exact staged diff with
    read-only file tools. Failed or unavailable review stops publication.
 6. Before publication, the controller checks that the issue is still open,

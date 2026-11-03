@@ -228,17 +228,10 @@ impl Worker<'_> {
                     return Err(error);
                 };
                 let content = fs::read_to_string(job.join(format!("check-1-{index}.log")))?;
-                let tail: String = content
-                    .chars()
-                    .rev()
-                    .take(10_000)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect();
+                let (note, tail) = repair_excerpt(&content, REPAIR_LOG_LIMIT);
                 let results: Value = serde_json::from_slice(&fs::read(job.join("checks-1.json"))?)?;
                 let failure = format!(
-                    "Failed check: {}\nargv: {}\nCheck results: {results}\nOutput (possibly empty):\n{tail}",
+                    "Failed check: {}\nargv: {}\nCheck results: {results}\n{note}\nOutput (possibly empty):\n{tail}",
                     self.config.checks[index].name,
                     json!(self.config.checks[index].argv)
                 );
@@ -485,6 +478,138 @@ fn run_name(job: &Path) -> String {
         .to_string_lossy()
         .into_owned()
 }
+/// Character budget for the check log handed to the repair call.
+const REPAIR_LOG_LIMIT: usize = 10_000;
+const STDERR_MARK: &str = "--- stderr ---";
+const SUMMARY_MARKS: &[&str] = &["Validation results:", "test result: FAILED"];
+const STRONG_MARKS: &[&str] = &["FAILED", "panicked at", "error[", "error:", "Diff in"];
+const WEAK_MARKS: &[&str] = &["warning:"];
+const CONTEXT_BEFORE: usize = 2;
+const CONTEXT_AFTER: usize = 30;
+const LINE_CAP: usize = 300;
+
+fn cap_line(line: &str) -> String {
+    if line.chars().count() <= LINE_CAP {
+        line.to_owned()
+    } else {
+        let head: String = line.chars().take(LINE_CAP).collect();
+        format!("{head}…")
+    }
+}
+
+/// Pick the part of a check log most useful for repair, within `limit` characters.
+/// Returns a description for the repair prompt and the excerpt. The log is
+/// stdout, then `--- stderr ---`, then stderr, so a plain tail can lose failures.
+fn repair_excerpt(content: &str, limit: usize) -> (String, String) {
+    let lines: Vec<&str> = content.lines().collect();
+    let total = lines.len();
+    if content.chars().count() <= limit {
+        return (
+            format!("Full log: {total} lines, shown in full."),
+            content.to_owned(),
+        );
+    }
+    let has = |line: &str, marks: &[&str]| marks.iter().any(|mark| line.contains(mark));
+    let stderr_at = lines.iter().position(|line| *line == STDERR_MARK);
+    let stdout_end = stderr_at.unwrap_or(total);
+    let summary: Vec<usize> = (0..stdout_end)
+        .filter(|&i| has(lines[i], SUMMARY_MARKS))
+        .collect();
+    let strong: Vec<usize> = (0..total)
+        .filter(|&i| has(lines[i], STRONG_MARKS))
+        .collect();
+    let weak: Vec<usize> = (0..total)
+        .filter(|&i| !strong.contains(&i) && has(lines[i], WEAK_MARKS))
+        .collect();
+    if summary.is_empty() && strong.is_empty() && weak.is_empty() {
+        let tail: String = {
+            let mut chars: Vec<char> = content.chars().rev().take(limit).collect();
+            chars.reverse();
+            chars.into_iter().collect()
+        };
+        return (
+            format!(
+                "Full log: {total} lines. No failure markers found; showing the last {limit} characters."
+            ),
+            tail,
+        );
+    }
+    let markers: Vec<usize> = strong.iter().chain(&weak).copied().collect();
+    let mut budget = limit;
+    loop {
+        let mut picked = vec![false; total];
+        let used = std::cell::Cell::new(0usize);
+        let add = |i: usize, cap: usize, picked: &mut Vec<bool>| -> bool {
+            if picked[i] {
+                return true;
+            }
+            let cost = cap_line(lines[i]).chars().count() + 1;
+            if used.get() + cost > cap {
+                return false;
+            }
+            used.set(used.get() + cost);
+            picked[i] = true;
+            true
+        };
+        for &i in summary.iter().chain(&markers) {
+            add(i, budget, &mut picked);
+        }
+        // Context is added nearest-first across all markers so one block cannot starve the rest.
+        for d in 1..=CONTEXT_AFTER.max(CONTEXT_BEFORE) {
+            for &i in &markers {
+                if d <= CONTEXT_AFTER && i + d < total {
+                    add(i + d, budget, &mut picked);
+                }
+                if d <= CONTEXT_BEFORE && i >= d {
+                    add(i - d, budget, &mut picked);
+                }
+            }
+        }
+        let half = used.get() + budget.saturating_sub(used.get()) / 2;
+        for i in (stdout_end.saturating_add(1)..total).rev() {
+            if !add(i, half, &mut picked) {
+                break;
+            }
+        }
+        for i in (0..stdout_end).rev() {
+            if !add(i, budget, &mut picked) {
+                break;
+            }
+        }
+        let mut out = String::new();
+        let mut next = 0usize;
+        for i in 0..=total {
+            if i < total && !picked[i] {
+                continue;
+            }
+            if i > next {
+                out.push_str(&format!("[... lines {}-{} omitted ...]\n", next + 1, i));
+            }
+            if i < total {
+                out.push_str(&cap_line(lines[i]));
+                out.push('\n');
+                next = i + 1;
+            } else {
+                next = total;
+            }
+        }
+        let len = out.chars().count();
+        if len <= limit {
+            let note = format!(
+                "Full log: {total} lines. Excerpt of up to {limit} characters: failure summary lines, lines around failures, then the end of stdout and stderr. Omitted ranges are marked as [... lines a-b omitted ...]."
+            );
+            return (note, out);
+        }
+        if budget == 0 {
+            return (
+                format!("Full log: {total} lines. Excerpt truncated to {limit} characters."),
+                out.chars().take(limit).collect(),
+            );
+        }
+        budget = budget.saturating_sub(len - limit);
+    }
+}
+
 fn bullets(items: &[String]) -> String {
     items
         .iter()
