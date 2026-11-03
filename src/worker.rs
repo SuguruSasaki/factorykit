@@ -391,20 +391,30 @@ impl Worker<'_> {
             bullets(&build.manual_checks)
         };
         let body = format!(
-            "Closes #{}\n\n## Change\n\n{}\n\n## Verification\n\nCommit: `{}`\n\n{table}\nIndependent read-only AI review: pass.\n\n## Still requires confirmation\n\n{manual}\n\nDraft PR. Human review and any live checks remain required. No merge or application update was performed. Private evidence: run `{}`.",
+            "Closes #{}\n\n## Change\n\n{}\n\n## Verification\n\nCommit: `{}`\n\n{table}\nIndependent read-only AI review: pass.\n\n## Still requires confirmation\n\n{manual}\n\n`human-merge` means factory work and checks are done and a person merges after confirming the items above. It is not approval to update the application. No merge or application update was performed. Private evidence: run `{}`.",
             issue.number,
             build.summary,
             sha.trim(),
             run_name(job)
         );
-        let url = self
+        let pr = self
             .queue
             .create_pr(branch, &self.config.base, &issue.title, &body)?;
         receipt["stage"] = json!("pr-created");
-        receipt["pr"] = json!(url);
+        receipt["pr"] = json!(pr.url);
         atomic_json(&job.join("receipt.json"), receipt)?;
+        let url = &pr.url;
         self.queue.transition(issue.number, "ai-review")?;
-        self.queue.comment(issue.number,&format!("Draft PR: {url}\n\nRun `{}`, head `{}`. Automatic checks and independent code review passed. Confirm the remaining checks before merging.",run_name(job),sha.trim()))?;
+        match self.queue.publish_pr(&pr) {
+            Ok(()) => {
+                receipt["stage"] = json!("pr-ready");
+                atomic_json(&job.join("receipt.json"), receipt)?;
+                self.queue.comment(issue.number,&format!("PR: {url} (Ready for review, `human-merge`)\n\nRun `{}`, head `{}`. Automatic checks and independent code review passed. A person confirms the remaining checks and merges. This is not approval to update the application.",run_name(job),sha.trim()))?;
+            }
+            Err(error) => {
+                self.queue.comment(issue.number,&format!("Draft PR: {url}\n\nRun `{}`, head `{}`. Checks passed, but marking the PR Ready and adding `human-merge` failed: {}\n\nThe PR stays Draft. Confirm the remaining checks, then mark it Ready and label it by hand.",run_name(job),sha.trim(),error.public_message()))?;
+            }
+        }
         Ok(json!({"status":"pr-created","issue":issue.number,"url":url}))
     }
 

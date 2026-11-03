@@ -73,6 +73,13 @@ steps. Without installing globally, use `cargo run --locked -- worker ...`.
    only the dedicated ai/issue-N branch. Configured push hooks remain active.
 7. It opens a draft PR with Closes #N, the head SHA, check statuses, and
    remaining live checks, then moves the issue to ai-review.
+8. It adds the PR label `human-merge`, then switches the PR to Ready for
+   review. The label means the factory's work and checks are finished and a
+   person merges after confirming the listed remaining checks. It is not
+   permission to update the application. If the label or the switch fails,
+   the PR stays Draft and the reason is commented on the issue, which is
+   still moved to ai-review. Merging stays with a person. `nikostack setup`
+   adds the `human-merge` label without changing existing labels.
 
 A review-only task uses read-only tools and reports findings without a PR.
 The worker reports code-review feedback as an issue comment under the current
