@@ -251,7 +251,7 @@ impl Worker<'_> {
             return Ok(json!({"status":"reported","issue":issue.number}));
         }
         let mut build = self.build(work, job, &prompt, Role::Implement)?;
-        let mut files = self.stage_and_guard(work)?;
+        let mut files = self.stage_format_and_guard(work, job, 1)?;
         if files.is_empty() {
             return Err(Error::blocked("No implementation change was produced."));
         }
@@ -279,7 +279,7 @@ impl Worker<'_> {
                     &format!("{prompt}\nFix the failed checks based on this output:\n{failure}"),
                     Role::Repair,
                 )?;
-                files = self.stage_and_guard(work)?;
+                files = self.stage_format_and_guard(work, job, 2)?;
                 if files.is_empty() {
                     return Err(Error::blocked("Repair removed all proposed changes."));
                 }
@@ -476,7 +476,51 @@ impl Worker<'_> {
             &["diff", "--cached", "--no-ext-diff", "--no-textconv"],
         )
     }
+    /// Stage the agent's edits, let the configured formatters rewrite them, and
+    /// guard the final patch. Formatting precedes the whitespace check so that
+    /// formatter-fixable whitespace does not stop the run.
+    fn stage_format_and_guard(&self, work: &Path, job: &Path, attempt: u8) -> Result<Vec<String>> {
+        if self.config.formatters.is_empty() {
+            return self.stage_and_guard(work);
+        }
+        let mut files = self.stage_files(work)?;
+        let mut ran = false;
+        for (index, formatter) in self.config.formatters.iter().enumerate() {
+            if !files
+                .iter()
+                .any(|file| formatter.paths.iter().any(|p| matches(p, file)))
+            {
+                continue;
+            }
+            ran = true;
+            let mut request = Request::new(&formatter.argv[0], work, formatter.argv[1..].iter());
+            request.timeout = Duration::from_secs(formatter.timeout_seconds);
+            request.log = Some(job.join(format!("format-{attempt}-{index}.log")));
+            match self.runner.run(request) {
+                Ok(_) => {}
+                Err(Error::Interrupted) => return Err(Error::Interrupted),
+                Err(error) => {
+                    return Err(Error::blocked(format!(
+                        "Formatter `{}` failed: {}",
+                        formatter.name,
+                        error.public_message()
+                    )));
+                }
+            }
+        }
+        if ran {
+            // Formatting may rewrite files or touch protected paths: restage and re-guard.
+            files = self.stage_files(work)?;
+        }
+        self.git(work, &["diff", "--cached", "--check"])?;
+        Ok(files)
+    }
     fn stage_and_guard(&self, work: &Path) -> Result<Vec<String>> {
+        let files = self.stage_files(work)?;
+        self.git(work, &["diff", "--cached", "--check"])?;
+        Ok(files)
+    }
+    fn stage_files(&self, work: &Path) -> Result<Vec<String>> {
         self.git(work, &["add", "--all"])?;
         let raw = self.git(
             work,
@@ -502,7 +546,6 @@ impl Worker<'_> {
                 }
             }
         }
-        self.git(work, &["diff", "--cached", "--check"])?;
         Ok(files)
     }
     fn validate(
