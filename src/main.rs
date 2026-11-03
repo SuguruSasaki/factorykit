@@ -20,18 +20,18 @@ use github::{GitHub, Queue};
 use process::Runner;
 use worker::Worker;
 
-const HELP: &str = "nikostack — local approval-based development workflow (macOS/Unix)
+const HELP: &str = "factorykit — local approval-based development workflow (macOS/Unix)
 
 Usage:
-  nikostack setup --repository OWNER/REPO [--apply]
-  nikostack worker --project PATH [--dry-run | --watch]
+  factorykit setup --repository OWNER/REPO [--apply]
+  factorykit worker --project PATH [--dry-run | --watch]
                    [--state-dir PATH] [--poll-seconds N]
 
 setup previews missing AI labels; --apply adds them without replacing existing labels.
-worker reads PATH/.nikostack/worker.json. Default: process one approved issue.
+worker reads PATH/.factorykit/worker.json. Default: process one approved issue.
 --dry-run lists queued issues without AI calls or GitHub writes.
 --watch polls serially (default 120 seconds, minimum 30); Ctrl-C stops it.
-State defaults to ~/.local/state/nikostack. Keep one state root per Mac.
+State defaults to ~/.local/state/factorykit. Keep one state root per Mac.
 Implementation/review require an existing Claude subscription login.
 No automatic merge, deployment, daemon installation, or product update.
 ";
@@ -60,7 +60,7 @@ fn run() -> Result<i32> {
         return Ok(0);
     }
     if args == ["--version"] {
-        println!("nikostack {}", env!("CARGO_PKG_VERSION"));
+        println!("factorykit {}", env!("CARGO_PKG_VERSION"));
         return Ok(0);
     }
     let options = Options::parse(&args)?;
@@ -83,14 +83,14 @@ fn run() -> Result<i32> {
         return Ok(0);
     }
     let project = PathBuf::from(options.required("--project")?).canonicalize()?;
-    let config = Config::load(&project.join(".nikostack/worker.json"))?;
+    let config = Config::load(&project.join(".factorykit/worker.json"))?;
     let root = match options.values.get("--state-dir") {
         Some(path) => PathBuf::from(path),
         None => PathBuf::from(
             std::env::var_os("HOME")
                 .ok_or_else(|| Error::blocked("Set --state-dir when HOME is unavailable."))?,
         )
-        .join(".local/state/nikostack"),
+        .join(".local/state/factorykit"),
     };
     let state = root.join(
         config
@@ -168,7 +168,7 @@ impl Options {
                 &["--project", "--state-dir", "--poll-seconds"],
                 &["--dry-run", "--watch"],
             ),
-            _ => return Err(Error::blocked("Unknown command; run nikostack --help.")),
+            _ => return Err(Error::blocked("Unknown command; run factorykit --help.")),
         };
         let mut options = Self {
             values: BTreeMap::new(),
@@ -180,13 +180,15 @@ impl Options {
                 let value = rest
                     .next()
                     .filter(|value| !value.starts_with("--"))
-                    .ok_or_else(|| Error::blocked("Missing option value; run nikostack --help."))?;
+                    .ok_or_else(|| {
+                        Error::blocked("Missing option value; run factorykit --help.")
+                    })?;
                 if options.values.insert(name.clone(), value.clone()).is_some() {
                     return Err(Error::blocked("Duplicate option."));
                 }
             } else if !flag_names.contains(&name.as_str()) || !options.flags.insert(name.clone()) {
                 return Err(Error::blocked(
-                    "Unknown or duplicate option; run nikostack --help.",
+                    "Unknown or duplicate option; run factorykit --help.",
                 ));
             }
         }

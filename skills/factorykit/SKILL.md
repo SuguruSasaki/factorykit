@@ -1,12 +1,12 @@
 ---
-name: nikostack
+name: factorykit
 description: Route a product-development request through the project's instructions and evidence. Use for first-time project setup, a small feature, bug fix, or code review; load the small-feature procedure for a feature change. Do not use for unrelated writing or operations work.
 disable-model-invocation: true
 ---
 
-# nikostack
+# factorykit
 
-Use this as an entry point for work in the **target product repository**. Identify that repository before acting. Its instructions, existing skills, decisions, and verification recipe govern the work; this skill does not replace them. Keep product-specific commands and acceptance criteria there. Do not copy private data or credentials into nikostack.
+Use this as an entry point for work in the **target product repository**. Identify that repository before acting. Its instructions, existing skills, decisions, and verification recipe govern the work; this skill does not replace them. Keep product-specific commands and acceptance criteria there. Do not copy private data or credentials into factorykit.
 
 For first-time adoption or a request to prepare the project's AI issue workflow,
 read [references/setup-project.md](references/setup-project.md). Check the GitHub

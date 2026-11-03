@@ -9,11 +9,11 @@ The original relative symbolic links exposed the skill to Codex and Claude Code 
 
 ## Decision
 
-Treat the repository root as the plugin package and keep `skills/nikostack/` as the single skill source. The root `plugin.json` is the portable manifest for Codex; `.claude-plugin/plugin.json` is the Claude Code compatibility manifest. Both marketplaces point to the repository root. Neither duplicates the skill content.
+Treat the repository root as the plugin package and keep `skills/factorykit/` as the single skill source. The root `plugin.json` is the portable manifest for Codex; `.claude-plugin/plugin.json` is the Claude Code compatibility manifest. Both marketplaces point to the repository root. Neither duplicates the skill content.
 
 Users install the plugin explicitly. It provides only the shared workflow. Product-specific specifications, verification commands, credentials, and MCP servers stay out of the package. The target product's instructions remain authoritative for its work.
 
-Users invoke the skill on demand from the target repository. Claude Code exposes the plugin skill as `/nikostack:nikostack`; Codex exposes it through `/skills` or `$nikostack`. Host-specific metadata disables implicit invocation where supported. Invocation does not replace the host's system message or create a persistent mode.
+Users invoke the skill on demand from the target repository. Claude Code exposes the plugin skill as `/factorykit:factorykit`; Codex exposes it through `/skills` or `$factorykit`. Host-specific metadata disables implicit invocation where supported. Invocation does not replace the host's system message or create a persistent mode.
 
 ## Verification and remaining work
 

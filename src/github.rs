@@ -397,8 +397,9 @@ pub(crate) fn setup(api: &dyn Api, repository: &Repository, apply: bool) -> Resu
     if repo["has_issues"] != true {
         return Err(Error::blocked("Enable Issues before preparing labels."));
     }
-    let definitions: Vec<Value> =
-        serde_json::from_str(include_str!("../skills/nikostack/assets/issue-labels.json"))?;
+    let definitions: Vec<Value> = serde_json::from_str(include_str!(
+        "../skills/factorykit/assets/issue-labels.json"
+    ))?;
     let label_names = || -> Result<Vec<String>> {
         let pages = queue.request("GET", "labels?per_page=100", None, true)?;
         let mut names = Vec::new();

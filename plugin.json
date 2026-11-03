@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "nikostack",
+  "name": "factorykit",
   "version": "0.2.0",
   "description": "Reusable, evidence-led development workflow for AI coding agents.",
-  "repository": "https://github.com/SuguruSasaki/nikostack"
+  "repository": "https://github.com/SuguruSasaki/factorykit"
 }
