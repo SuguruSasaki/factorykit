@@ -91,10 +91,13 @@ struct FakeApi {
     approver_kind: RefCell<String>,
     permission: RefCell<String>,
     fail_comments: Cell<bool>,
+    /// Other issues by number; an absent number is a GitHub 404.
+    others: RefCell<std::collections::BTreeMap<u64, Value>>,
 }
 impl Default for FakeApi {
     fn default() -> Self {
         Self {
+            others: RefCell::new(Default::default()),
             issue: RefCell::new(issue_value()),
             writes: RefCell::new(vec![]),
             queued: Cell::new(false),
@@ -138,6 +141,18 @@ impl Api for FakeApi {
                 } else {
                     json!([])
                 });
+            }
+            if let Some(number) = endpoint
+                .strip_prefix("repos/owner/repo/issues/")
+                .and_then(|n| n.parse::<u64>().ok())
+                .filter(|n| *n != 7)
+            {
+                return self
+                    .others
+                    .borrow()
+                    .get(&number)
+                    .cloned()
+                    .ok_or_else(|| Error::blocked("Command failed: gh"));
             }
             return Ok(self.issue.borrow().clone());
         }
@@ -512,6 +527,130 @@ fn invalid_task_is_blocked_and_reporting_failure_is_explicit() {
         receipt["run"].is_string(),
         "run IDs must be readable JSON strings"
     );
+}
+
+fn other(number: u64, state: &str, reason: Option<&str>, prerequisites: &str) -> Value {
+    json!({"number":number,"title":"other","body":format!("### 前提\n{prerequisites}\n"),
+        "state":state,"state_reason":reason,"labels":[],"user":{"login":"owner","type":"User"}})
+}
+/// A queued, approved issue #7 whose 前提 section is `text`.
+fn queued_with(fixture: &Fixture, text: &str) {
+    fixture.api.queued.set(true);
+    let mut issue = fixture.api.issue.borrow_mut();
+    issue["labels"] = json!([{"name":"ai-ready"}]);
+    let body = issue["body"].as_str().expect("body").to_owned();
+    issue["body"] = json!(format!("{body}### 前提\n{text}\n"));
+}
+fn labels_posted(fixture: &Fixture) -> Vec<Value> {
+    fixture
+        .api
+        .writes
+        .borrow()
+        .iter()
+        .filter(|(endpoint, _)| endpoint.ends_with("/labels"))
+        .map(|(_, payload)| payload["labels"][0].clone())
+        .collect()
+}
+
+#[test]
+fn open_prerequisite_skips_without_label_change_or_comment_until_completed() {
+    let fixture = Fixture::new(Behavior::Good);
+    fixture.api.existing_pr.set(true); // a picked issue stops here, offline
+    queued_with(&fixture, "#12, #13");
+    {
+        let mut others = fixture.api.others.borrow_mut();
+        others.insert(12, other(12, "closed", Some("completed"), ""));
+        others.insert(13, other(13, "open", None, ""));
+    }
+    let result = fixture.worker().once(false).expect("waiting");
+    assert_eq!(result["status"], "waiting");
+    assert_eq!(result["waiting"], json!([{"issue":7,"waiting_for":[13]}]));
+    assert!(fixture.api.writes.borrow().is_empty(), "no write");
+    assert_eq!(
+        fixture.api.issue.borrow()["labels"],
+        json!([{"name":"ai-ready"}])
+    );
+    // Dry-run separates what can start from what waits, and names the number.
+    let preview = fixture.worker().once(true).expect("preview");
+    assert_eq!(preview["ready"], json!([]));
+    assert_eq!(preview["waiting"][0]["waiting_for"], json!([13]));
+    assert!(fixture.api.writes.borrow().is_empty());
+    // Next patrol after the prerequisite completed.
+    fixture
+        .api
+        .others
+        .borrow_mut()
+        .insert(13, other(13, "closed", Some("completed"), ""));
+    assert_eq!(
+        fixture.worker().once(true).expect("preview")["ready"][0]["number"],
+        7
+    );
+    assert_eq!(
+        fixture.worker().once(false).expect("picked")["status"],
+        "existing-pr"
+    );
+    assert_eq!(fixture.agent.calls.get(), 0);
+}
+
+#[test]
+fn issue_without_or_with_completed_prerequisites_is_picked_as_before() {
+    for text in ["", "#12"] {
+        let fixture = Fixture::new(Behavior::Good);
+        fixture.api.existing_pr.set(true);
+        queued_with(&fixture, text);
+        fixture
+            .api
+            .others
+            .borrow_mut()
+            .insert(12, other(12, "closed", Some("completed"), ""));
+        assert_eq!(
+            fixture.worker().once(false).expect("picked")["status"],
+            "existing-pr",
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn unsatisfiable_prerequisites_block_the_issue_with_a_reason() {
+    let not_planned = other(12, "closed", Some("not_planned"), "");
+    let no_reason = other(12, "closed", None, "");
+    let (first, second) = (
+        other(12, "open", None, "#13"),
+        other(13, "open", None, "#7"),
+    );
+    type Case<'a> = (&'a str, Vec<(u64, Value)>, &'a str);
+    let cases: [Case; 6] = [
+        ("#12", vec![(12, not_planned)], "#12"),
+        ("#99", vec![], "#99"),
+        ("#7", vec![], "itself"),
+        ("owner/other#3", vec![], "owner/other#3"),
+        ("#12", vec![(12, first), (13, second)], "cycle"),
+        ("#12", vec![(12, no_reason)], "#12"),
+    ];
+    for (text, others, expected) in cases {
+        let fixture = Fixture::new(Behavior::Good);
+        queued_with(&fixture, text);
+        fixture.api.others.borrow_mut().extend(others);
+        let result = fixture.worker().once(false).expect("blocked");
+        assert_eq!(result["status"], "waiting", "{text}");
+        assert_eq!(result["blocked"][0]["issue"], 7, "{text}");
+        assert_eq!(
+            fixture.api.issue.borrow()["labels"],
+            json!([{"name":"ai-blocked"}]),
+            "{text}"
+        );
+        assert_eq!(labels_posted(&fixture), vec![json!("ai-blocked")], "{text}");
+        let writes = fixture.api.writes.borrow();
+        let comments: Vec<_> = writes
+            .iter()
+            .filter(|(endpoint, _)| endpoint.ends_with("/comments"))
+            .collect();
+        assert_eq!(comments.len(), 1, "{text}");
+        let body = comments[0].1["body"].as_str().expect("body");
+        assert!(body.contains(expected), "{text}");
+        assert_eq!(fixture.agent.calls.get(), 0);
+    }
 }
 
 #[test]

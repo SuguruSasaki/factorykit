@@ -102,6 +102,30 @@ This uses [GitHub CLI's documented opt-out](https://docs.github.com/en/github-cl
 without changing the user's global configuration or redirecting traffic.
 It controls the standard GitHub CLI collector, not arbitrary extensions.
 
+## Prerequisites between issues
+
+An issue may have an optional 前提 section listing issues of the same
+repository that must be done first, written as `#47, #48` (commas or spaces).
+No section, or an empty one, means no prerequisite. Do not put ai-ready on a
+parent issue that only tracks children; label the child issues, each listing
+its predecessors in 前提.
+
+Before picking an approved ai-ready issue, the worker checks every listed issue:
+
+- All closed as completed: the issue is picked as usual.
+- Any still open: the issue is skipped with its labels unchanged and no comment.
+  The next patrol checks again. The skip and the waiting numbers are printed
+  to stderr and returned in the result (`status: waiting` or a `waiting` list).
+- Closed for any other reason (not planned, duplicate, unknown): the issue
+  becomes ai-blocked with an explanatory comment.
+- A nonexistent number, another repository or a malformed entry, the issue
+  itself, or a cycle among open prerequisites: ai-blocked with a comment.
+
+After fixing the cause, remove ai-blocked and add ai-ready again.
+--dry-run lists `ready`, `waiting` (with `waiting_for`), and `blocked`
+issues separately without writing. The worker relies on the closed-as-completed
+state; it does not verify that a merge reached the base branch.
+
 ## Stop and recover
 
 Ctrl-C or SIGTERM stops the worker and its current child process group.

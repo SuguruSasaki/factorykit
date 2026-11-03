@@ -51,6 +51,13 @@ A ready task needs 作業種別 (feature, bug, or review), 目的, 対象範囲,
 期待する動作, 完了条件, and 検証方法. A label is authorization for that stated
 scope, not permission to merge or install software.
 
+The form's optional 前提 field lists issues of the same repository that must
+be finished first, written like `#47, #48`. The worker starts an issue only
+when each listed issue is closed as completed. Leave the field empty for no
+prerequisite. When a parent issue is split into ordered child issues, list each
+child's predecessors in its 前提 and do not put ai-ready on the parent issue:
+it is a tracking issue, not a task.
+
 If enabling the optional Mac worker, use [worker.example.json](../assets/worker.example.json)
 as the product's .nikostack/worker.json and configure actual argv-based checks.
 The empty check list is deliberately invalid until project checks are chosen.

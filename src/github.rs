@@ -8,6 +8,16 @@ use crate::process::{Request, Runner};
 
 pub(crate) const STATES: [&str; 4] = ["ai-ready", "ai-in-progress", "ai-blocked", "ai-review"];
 
+/// Whether an issue's `前提` issues allow starting it.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Gate {
+    Ready,
+    /// Open prerequisite numbers; skip without changing labels.
+    Waiting(Vec<u64>),
+    /// The prerequisites can never be satisfied as written.
+    Blocked(String),
+}
+
 /// The transport boundary allows queue and label tests without GitHub writes.
 pub(crate) trait Api {
     fn request(
@@ -97,6 +107,101 @@ impl Queue<'_> {
             None,
             false,
         )?)?)
+    }
+    /// An issue that GitHub does not know is `None`. If the repository itself
+    /// cannot be read, the failure is an outage and propagates instead.
+    fn lookup(&self, number: u64) -> Result<Option<Issue>> {
+        match self.issue(number) {
+            Ok(issue) => Ok(Some(issue)),
+            Err(Error::Blocked(_)) => {
+                self.api.request(
+                    "GET",
+                    &format!("repos/{}", self.repository.as_str()),
+                    None,
+                    false,
+                )?;
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+    /// Decide whether the issue's `前提` issues allow starting it. Only reads.
+    pub(crate) fn gate(&self, issue: &Issue) -> Result<Gate> {
+        let prerequisites = match issue.prerequisites() {
+            Ok(numbers) => numbers,
+            Err(error) => return Ok(Gate::Blocked(error.public_message().to_owned())),
+        };
+        let mut waiting = Vec::new();
+        let mut open = Vec::new();
+        for number in prerequisites {
+            let Some(found) = self.lookup(number)? else {
+                return Ok(Gate::Blocked(format!(
+                    "Prerequisite #{number} does not exist in this repository."
+                )));
+            };
+            match (found.state.as_str(), found.state_reason.as_deref()) {
+                ("open", _) => {
+                    waiting.push(number);
+                    open.push(found);
+                }
+                ("closed", Some("completed")) => {}
+                _ => {
+                    return Ok(Gate::Blocked(format!(
+                        "Prerequisite #{number} was closed without being completed (not planned); decide whether to remove it from 前提, then requeue."
+                    )));
+                }
+            }
+        }
+        if waiting.is_empty() {
+            return Ok(Gate::Ready);
+        }
+        let mut path = vec![issue.number];
+        let mut seen = std::collections::BTreeSet::new();
+        for found in &open {
+            if let Some(reason) = self.cycle(found, &mut path, &mut seen)? {
+                return Ok(Gate::Blocked(reason));
+            }
+        }
+        Ok(Gate::Waiting(waiting))
+    }
+    /// Follow open prerequisites looking for a way back to a path member.
+    fn cycle(
+        &self,
+        issue: &Issue,
+        path: &mut Vec<u64>,
+        seen: &mut std::collections::BTreeSet<u64>,
+    ) -> Result<Option<String>> {
+        if !seen.insert(issue.number) {
+            return Ok(None);
+        }
+        if seen.len() > 50 {
+            return Ok(Some("Prerequisite chain is too long to check.".to_owned()));
+        }
+        // Another issue's malformed list blocks that issue, not this one.
+        let Ok(next) = issue.prerequisites() else {
+            return Ok(None);
+        };
+        path.push(issue.number);
+        for number in next {
+            if path.contains(&number) {
+                path.push(number);
+                let reason = format!(
+                    "Prerequisites form a cycle: {}.",
+                    path.iter()
+                        .map(|n| format!("#{n}"))
+                        .collect::<Vec<_>>()
+                        .join(" -> ")
+                );
+                return Ok(Some(reason));
+            }
+            if let Some(found) = self.lookup(number)?.filter(|found| found.state == "open")
+                && let Some(reason) = self.cycle(&found, path, seen)?
+            {
+                return Ok(Some(reason));
+            }
+        }
+        path.pop();
+        Ok(None)
     }
     pub(crate) fn trusted(&self, issue: &Issue) -> Result<bool> {
         let pages = self.request(

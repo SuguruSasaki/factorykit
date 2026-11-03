@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::agent::{Agent, Build, BuildStatus, Review, Role, Task, Verdict};
 use crate::domain::{CheckResult, CheckStatus, Config, Issue, TaskKind, matches};
 use crate::error::{Error, Result};
-use crate::github::{Queue, string};
+use crate::github::{Gate, Queue, string};
 use crate::process::{Request, Runner};
 use crate::state::atomic_json;
 
@@ -44,22 +44,55 @@ impl Worker<'_> {
     pub(crate) fn once(&self, dry_run: bool) -> Result<Value> {
         let issues = self.queue.ready()?;
         if dry_run {
-            return Ok(
-                json!({"ready":issues.iter().map(|i|json!({"number":i.number,"title":i.title})).collect::<Vec<_>>()}),
-            );
+            let (mut ready, mut waiting, mut blocked) = (vec![], vec![], vec![]);
+            for issue in &issues {
+                let entry = json!({"number":issue.number,"title":issue.title});
+                match self.queue.gate(issue)? {
+                    Gate::Ready => ready.push(entry),
+                    Gate::Waiting(numbers) => waiting.push(
+                        json!({"number":issue.number,"title":issue.title,"waiting_for":numbers}),
+                    ),
+                    Gate::Blocked(reason) => blocked
+                        .push(json!({"number":issue.number,"title":issue.title,"reason":reason})),
+                }
+            }
+            return Ok(json!({"ready":ready,"waiting":waiting,"blocked":blocked}));
         }
         if issues.is_empty() {
             return Ok(json!({"status":"idle"}));
         }
         let mut selected = None;
+        let mut approved = false;
+        let (mut waiting, mut blocked) = (vec![], vec![]);
         for issue in issues {
-            if self.queue.trusted(&issue)? {
-                selected = Some(issue);
-                break;
+            if !self.queue.trusted(&issue)? {
+                continue;
+            }
+            approved = true;
+            match self.queue.gate(&issue)? {
+                Gate::Ready => {
+                    selected = Some(issue);
+                    break;
+                }
+                // Labels stay unchanged and nothing is commented: the next patrol re-checks.
+                Gate::Waiting(numbers) => {
+                    eprintln!("Skipped #{}: waiting for {numbers:?}", issue.number);
+                    waiting.push(json!({"issue":issue.number,"waiting_for":numbers}));
+                }
+                Gate::Blocked(reason) => {
+                    self.queue.transition(issue.number, "ai-blocked")?;
+                    self.queue.comment(issue.number, &format!(
+                        "Not started: {reason}\n\nNo automatic retry. Fix the 前提 section or the prerequisite issue, then explicitly requeue with ai-ready."))?;
+                    blocked.push(json!({"issue":issue.number,"reason":reason}));
+                }
             }
         }
         let Some(issue) = selected else {
-            return Ok(json!({"status":"unapproved"}));
+            return Ok(if approved {
+                json!({"status":"waiting","waiting":waiting,"blocked":blocked})
+            } else {
+                json!({"status":"unapproved"})
+            });
         };
         let latest = self.queue.issue(issue.number)?;
         if !latest.eligible() || !latest.same_scope(&issue) || !self.queue.trusted(&latest)? {
@@ -99,7 +132,12 @@ impl Worker<'_> {
             self.execute(&issue, kind, &job, &work, &branch, &mut receipt)
         })();
         match outcome {
-            Ok(value) => Ok(value),
+            Ok(mut value) => {
+                if !waiting.is_empty() {
+                    value["waiting"] = json!(waiting);
+                }
+                Ok(value)
+            }
             Err(Error::Interrupted) => {
                 receipt["stage"] = json!("interrupted");
                 atomic_json(&job.join("receipt.json"), &receipt)?;

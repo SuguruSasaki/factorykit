@@ -53,3 +53,10 @@ body:
       description: 自動チェック、実動確認、必要な環境、未実行時の扱い
     validations:
       required: true
+  - type: textarea
+    id: prerequisites
+    attributes:
+      label: 前提
+      description: 先に完了している必要がある同じリポジトリのIssue番号を「#47, #48」のように並べる。なければ空のまま
+    validations:
+      required: false
