@@ -8,6 +8,14 @@
     ".agents/skills/markdown-docs",
     "docs/decisions"
   ],
+  "formatters": [
+    {
+      "name": "rustfmt",
+      "argv": ["cargo", "fmt", "--all"],
+      "paths": ["*.rs", "**/*.rs"],
+      "timeout_seconds": 300
+    }
+  ],
   "checks": [
     {
       "name": "Markdown patch whitespace",
