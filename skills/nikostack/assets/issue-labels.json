@@ -18,5 +18,10 @@
     "name": "ai-review",
     "color": "5319E7",
     "description": "調査結果またはDraft PRを提出済み。人の確認待ち。マージ・アプリ更新の許可ではない。"
+  },
+  {
+    "name": "human-merge",
+    "color": "FBCA04",
+    "description": "PR用。ファクトリー側の作業と検査が終わり、人のマージ待ち。アプリ更新の許可ではない。"
   }
 ]

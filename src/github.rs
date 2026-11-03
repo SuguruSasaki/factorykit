@@ -8,6 +8,9 @@ use crate::process::{Request, Runner};
 
 pub(crate) const STATES: [&str; 4] = ["ai-ready", "ai-in-progress", "ai-blocked", "ai-review"];
 
+/// PR label: factory work and checks are done; a person merges. Not approval to update the app.
+pub(crate) const HUMAN_MERGE: &str = "human-merge";
+
 /// Whether an issue's `前提` issues allow starting it.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Gate {
@@ -295,15 +298,69 @@ impl Queue<'_> {
         base: &str,
         title: &str,
         body: &str,
-    ) -> Result<String> {
+    ) -> Result<PullRequest> {
         let value = self.request(
             "POST",
             "pulls",
             Some(json!({"head":branch,"base":base,"title":title,"body":body,"draft":true})),
             false,
         )?;
-        Ok(string(&value, "html_url")?.to_owned())
+        Ok(PullRequest {
+            url: string(&value, "html_url")?.to_owned(),
+            number: value["number"]
+                .as_u64()
+                .ok_or_else(|| Error::blocked("Missing GitHub response field."))?,
+            node_id: string(&value, "node_id")?.to_owned(),
+        })
     }
+    /// Mark a Draft PR as awaiting the human merge. The label goes first so a
+    /// failure leaves the PR in Draft; if switching to Ready then fails, the
+    /// label is withdrawn on a best-effort basis.
+    pub(crate) fn publish_pr(&self, pr: &PullRequest) -> Result<()> {
+        self.request(
+            "POST",
+            &format!("issues/{}/labels", pr.number),
+            Some(json!({"labels":[HUMAN_MERGE]})),
+            false,
+        )?;
+        let ready = self
+            .api
+            .request(
+                "POST",
+                "graphql",
+                Some(json!({
+                    "query":"mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }",
+                    "variables":{"id":pr.node_id},
+                })),
+                false,
+            )
+            .and_then(|value| {
+                if value.get("errors").is_some_and(|errors| !errors.is_null()) {
+                    Err(Error::blocked(
+                        "GitHub refused to mark the pull request ready for review.",
+                    ))
+                } else {
+                    Ok(())
+                }
+            });
+        if let Err(error) = ready {
+            let _ = self.request(
+                "DELETE",
+                &format!("issues/{}/labels/{HUMAN_MERGE}", pr.number),
+                None,
+                false,
+            );
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
+/// A created pull request: the URL for people, the number for REST, the node ID for GraphQL.
+pub(crate) struct PullRequest {
+    pub url: String,
+    pub number: u64,
+    pub node_id: String,
 }
 
 pub(crate) fn array(value: &Value) -> Result<&[Value]> {
@@ -443,22 +500,23 @@ mod tests {
                 .as_array()
                 .expect("array")
                 .len(),
-            3
+            4
         );
         assert!(api.writes.borrow().is_empty());
-        assert_eq!(
-            setup(&api, &repo, true).expect("apply")["created"]
+        let applied = setup(&api, &repo, true).expect("apply");
+        assert_eq!(applied["created"].as_array().expect("array").len(), 4);
+        assert!(
+            applied["created"]
                 .as_array()
                 .expect("array")
-                .len(),
-            3
+                .contains(&json!("human-merge"))
         );
         assert_eq!(api.labels.borrow()[0], original);
         assert_eq!(
             setup(&api, &repo, true).expect("repeat")["created"],
             json!([])
         );
-        assert_eq!(api.writes.borrow().len(), 3);
+        assert_eq!(api.writes.borrow().len(), 4);
     }
     #[test]
     fn setup_rejects_missing_write_permission_without_writes() {

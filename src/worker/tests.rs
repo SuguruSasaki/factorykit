@@ -91,6 +91,7 @@ struct FakeApi {
     approver_kind: RefCell<String>,
     permission: RefCell<String>,
     fail_comments: Cell<bool>,
+    fail_pr_label: Cell<bool>,
     /// Other issues by number; an absent number is a GitHub 404.
     others: RefCell<std::collections::BTreeMap<u64, Value>>,
 }
@@ -105,6 +106,7 @@ impl Default for FakeApi {
             approver_kind: RefCell::new("User".to_owned()),
             permission: RefCell::new("write".to_owned()),
             fail_comments: Cell::new(false),
+            fail_pr_label: Cell::new(false),
         }
     }
 }
@@ -163,7 +165,10 @@ impl Api for FakeApi {
         if endpoint.ends_with("/comments") && self.fail_comments.get() {
             return Err(Error::blocked("Simulated reporting outage."));
         }
-        if endpoint.ends_with("/labels") {
+        if endpoint.ends_with("issues/9/labels") && self.fail_pr_label.get() {
+            return Err(Error::blocked("Simulated label failure."));
+        }
+        if endpoint.ends_with("issues/7/labels") {
             self.issue.borrow_mut()["labels"]
                 .as_array_mut()
                 .expect("labels")
@@ -176,7 +181,9 @@ impl Api for FakeApi {
                 .retain(|label| label["name"] != name);
         }
         if endpoint.ends_with("/pulls") {
-            return Ok(json!({"html_url":"https://github.com/owner/repo/pull/9"}));
+            return Ok(
+                json!({"html_url":"https://github.com/owner/repo/pull/9","number":9,"node_id":"PR_node"}),
+            );
         }
         Ok(Value::Null)
     }
@@ -383,6 +390,62 @@ fn successful_run_checks_reviews_and_pushes_only_its_branch() {
         fixture.api.issue.borrow()["labels"],
         json!([{"name":"ai-review"}])
     );
+}
+
+fn count_writes(fixture: &Fixture, endpoint: &str) -> usize {
+    fixture
+        .api
+        .writes
+        .borrow()
+        .iter()
+        .filter(|(written, _)| written.ends_with(endpoint))
+        .count()
+}
+
+#[test]
+fn published_pr_is_marked_ready_and_labeled_once() {
+    let fixture = Fixture::new(Behavior::Good);
+    fixture.execute().expect("run");
+    assert_eq!(count_writes(&fixture, "graphql"), 1);
+    assert_eq!(count_writes(&fixture, "issues/9/labels"), 1);
+    let writes = fixture.api.writes.borrow();
+    let (_, label) = writes
+        .iter()
+        .find(|(endpoint, _)| endpoint.ends_with("issues/9/labels"))
+        .expect("label");
+    assert_eq!(label["labels"], json!(["human-merge"]));
+    let (_, ready) = writes
+        .iter()
+        .find(|(endpoint, _)| endpoint.ends_with("graphql"))
+        .expect("ready");
+    assert_eq!(ready["variables"]["id"], "PR_node");
+}
+
+#[test]
+fn label_failure_leaves_draft_and_explains_on_the_issue() {
+    let fixture = Fixture::new(Behavior::Good);
+    fixture.api.fail_pr_label.set(true);
+    assert_eq!(fixture.execute().expect("run")["status"], "pr-created");
+    assert_eq!(count_writes(&fixture, "graphql"), 0);
+    assert_eq!(
+        fixture.api.issue.borrow()["labels"],
+        json!([{"name":"ai-review"}])
+    );
+    let writes = fixture.api.writes.borrow();
+    let (_, comment) = writes
+        .iter()
+        .rfind(|(endpoint, _)| endpoint.ends_with("issues/7/comments"))
+        .expect("comment");
+    let text = comment["body"].as_str().expect("body");
+    assert!(text.contains("stays Draft") && text.contains("Simulated label failure"));
+}
+
+#[test]
+fn failed_checks_never_label_a_pr() {
+    let fixture = Fixture::new(Behavior::AlwaysFail);
+    assert!(fixture.execute().is_err());
+    assert_eq!(count_writes(&fixture, "graphql"), 0);
+    assert_eq!(count_writes(&fixture, "issues/9/labels"), 0);
 }
 
 #[test]

@@ -37,6 +37,7 @@ The shared definitions are [issue-labels.json](../assets/issue-labels.json):
 | ai-in-progress | A worker claimed the task. Do not start another owner. |
 | ai-blocked | Work stopped. Inspect the reason before explicitly requeueing. |
 | ai-review | A report or draft PR awaits human review. |
+| human-merge | On a PR: factory work and checks are done and a person merges. Not permission to update the app. |
 
 Label names are the worker's protocol in this version. Existing same-name
 labels are preserved, so check that their local meanings are compatible.
