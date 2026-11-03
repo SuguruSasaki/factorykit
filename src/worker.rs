@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use crate::agent::{Agent, Build, BuildStatus, Review, Role, Task, Verdict};
 use crate::domain::{CheckResult, CheckStatus, Config, Issue, TaskKind, matches};
 use crate::error::{Error, Result};
-use crate::github::{Gate, Queue, string};
+use crate::github::{Gate, HUMAN_VERIFY, Queue, string};
 use crate::process::{Request, Runner};
 use crate::state::atomic_json;
 
@@ -385,13 +385,21 @@ impl Worker<'_> {
                 check.name.replace('|', "\\|")
             ));
         }
-        let manual = if build.manual_checks.is_empty() {
-            "- Confirm acceptance on the affected product surface.".to_owned()
+        let human_verify = issue.has_label(HUMAN_VERIFY);
+        let confirmation = if human_verify {
+            let manual = if build.manual_checks.is_empty() {
+                "- Confirm acceptance on the affected product surface.".to_owned()
+            } else {
+                bullets(&build.manual_checks)
+            };
+            format!(
+                "## Verify by hand before merging\n\n{manual}\n\n`human-verify` means a person must run the behavior above, which machines could not check, and merge only after confirming it. It is not approval to update the application."
+            )
         } else {
-            bullets(&build.manual_checks)
+            "## Manual verification\n\nNot required. The merge can rely on the verification evidence above. This is not approval to update the application.".to_owned()
         };
         let body = format!(
-            "Closes #{}\n\n## Change\n\n{}\n\n## Verification\n\nCommit: `{}`\n\n{table}\nIndependent read-only AI review: pass.\n\n## Still requires confirmation\n\n{manual}\n\n`human-merge` means factory work and checks are done and a person merges after confirming the items above. It is not approval to update the application. No merge or application update was performed. Private evidence: run `{}`.",
+            "Closes #{}\n\n## Change\n\n{}\n\n## Verification\n\nCommit: `{}`\n\n{table}\nIndependent read-only AI review: pass.\n\n{confirmation}\n\nNo merge or application update was performed. Private evidence: run `{}`.",
             issue.number,
             build.summary,
             sha.trim(),
@@ -405,14 +413,37 @@ impl Worker<'_> {
         atomic_json(&job.join("receipt.json"), receipt)?;
         let url = &pr.url;
         self.queue.transition(issue.number, "ai-review")?;
-        match self.queue.publish_pr(&pr) {
+        match self.queue.publish_pr(&pr, human_verify) {
             Ok(()) => {
                 receipt["stage"] = json!("pr-ready");
                 atomic_json(&job.join("receipt.json"), receipt)?;
-                self.queue.comment(issue.number,&format!("PR: {url} (Ready for review, `human-merge`)\n\nRun `{}`, head `{}`. Automatic checks and independent code review passed. A person confirms the remaining checks and merges. This is not approval to update the application.",run_name(job),sha.trim()))?;
+                let next = if human_verify {
+                    format!(
+                        "PR: {url} (Ready for review, `{HUMAN_VERIFY}`)\n\nRun `{}`, head `{}`. Automatic checks and independent code review passed. A person runs the behavior listed in the PR that machines could not check, then merges. This is not approval to update the application.",
+                        run_name(job),
+                        sha.trim()
+                    )
+                } else {
+                    format!(
+                        "PR: {url} (Ready for review)\n\nRun `{}`, head `{}`. Automatic checks and independent code review passed. No manual verification is needed; the merge can rely on the verification evidence. This is not approval to update the application.",
+                        run_name(job),
+                        sha.trim()
+                    )
+                };
+                self.queue.comment(issue.number, &next)?;
             }
             Err(error) => {
-                self.queue.comment(issue.number,&format!("Draft PR: {url}\n\nRun `{}`, head `{}`. Checks passed, but marking the PR Ready and adding `human-merge` failed: {}\n\nThe PR stays Draft. Confirm the remaining checks, then mark it Ready and label it by hand.",run_name(job),sha.trim(),error.public_message()))?;
+                let action = if human_verify {
+                    format!("marking the PR Ready and adding `{HUMAN_VERIFY}`")
+                } else {
+                    "marking the PR Ready".to_owned()
+                };
+                let hand = if human_verify {
+                    "Verify the listed behavior by hand, then mark it Ready and label it by hand."
+                } else {
+                    "Mark it Ready by hand."
+                };
+                self.queue.comment(issue.number,&format!("Draft PR: {url}\n\nRun `{}`, head `{}`. Checks passed, but {action} failed: {}\n\nThe PR stays Draft. {hand}",run_name(job),sha.trim(),error.public_message()))?;
             }
         }
         Ok(json!({"status":"pr-created","issue":issue.number,"url":url}))
