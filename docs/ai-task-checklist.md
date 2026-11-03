@@ -1,14 +1,18 @@
 # AI task checklist
 
 Use this checklist before asking an AI agent to work on an issue. A clear issue
-lets a reviewer confirm the intent and lets the agent stop at the right boundary.
+lets a person confirm the intent and lets the agent stop at the right boundary.
 
 ## Labels
 
 - `ai-ready`: a human has approved work on the scope described in the issue.
   Do not start work without this label.
-- `ai-review`: the agent has reported back or opened a Draft PR, and a human
-  must check the result before anything else happens.
+- `ai-review`: the agent has reported back or opened a PR. A PR with
+  `human-verify` awaits a person's check of its behavior. This is not
+  permission to merge or update the app.
+- `human-verify`: add it together with `ai-ready` to an issue that has a
+  `人が確認` item. The PR gets the same label, and a person runs that behavior
+  on the product before merging.
 
 ## Before starting
 
@@ -72,19 +76,23 @@ machine can run, such as required headings or links that must resolve.
 - [ ] Every acceptance criterion is an executable check or is marked `人が確認`.
 - [ ] The issue is a single task, not a parent that only lists child issues.
       Do not mark a parent issue `ai-ready`.
-- [ ] Every prerequisite issue is already merged. The worker does not read
-      prerequisites yet, so mark dependent issues `ai-ready` one at a time.
+- [ ] Prerequisite issues are listed in the 前提 section. The worker waits
+      until every listed issue is closed as completed, so dependent issues
+      can all be marked `ai-ready` at once.
+- [ ] An issue with a `人が確認` item also has `human-verify`.
 - [ ] Protected paths and secrets are not part of the requested change.
 - [ ] Someone with authority has approved the scope.
 
 ## After the agent reports
 
-- Read the report and the Draft PR diff; do not rely on passing checks alone.
+- Read the report: what the checks confirmed, what they did not, and the
+  items to confirm on the product.
 - Confirm each acceptance criterion against the evidence.
+- For a PR with `human-verify`, run the listed behavior before merging.
 - Record any check that was not run or was blocked.
 
 ## Human decisions
 
-Merging a PR and updating an installed app are separate decisions. Both need
-human review. Automated merge and automated installation are not performed by
+Merging a PR and updating an installed app are separate decisions. Both are
+made by a person. Automated merge and automated installation are not performed by
 this workflow.
