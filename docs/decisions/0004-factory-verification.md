@@ -94,7 +94,8 @@ merge never ships before the verifier:
 1. Remove human code review assumptions from the skill, label descriptions,
    and maintainer instructions.
 2. Add the verifier, criterion mapping, and red-to-green evidence, replacing
-   the read-only review.
+   the read-only review. Triage blocked runs by cause as described in
+   [0006](0006-blocked-run-triage.md).
 3. Add the product-owned invariant ledger and mutation evidence.
 4. Make the controller claim and run up to N issues in parallel.
 5. Add the merge manager and the `human-verify` label.
