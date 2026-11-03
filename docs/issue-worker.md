@@ -25,7 +25,11 @@ First follow [project setup](../skills/factorykit/references/setup-project.md).
 The project owns .factorykit/worker.json. Set repository, base, checks, any
 extra protected_paths, and optional hooks_path. Each check is a name and argv
 array; optional paths selects affected files and timeout_seconds bounds the
-command. Do not put credentials or personal data in the configuration.
+command. Optional formatters use the same fields as checks (timeout_seconds
+defaults to 300, at most 1800; paths defaults to all files) and are validated
+by the same rules; an invalid one stops the worker at startup. Omitting
+formatters or leaving them empty keeps the previous behavior. Do not put
+credentials or personal data in the configuration.
 
 Install once from the factorykit source checkout, then replace the product path:
 
@@ -57,6 +61,14 @@ steps. Without installing globally, use `cargo run --locked -- worker ...`.
    The original development checkout is not changed.
 4. Claude reads the shared factorykit source plus product instructions and
    edits through file tools. Shell, GitHub, MCP, and subagent tools are absent.
+   Formatting is run by the controller, never by the AI: after the
+   implementation edit and again after a repair edit, and before the checks,
+   it runs each configured formatter whose paths match a changed file. It then
+   stages the result again and repeats the protected-path check, so a formatter
+   that changes a protected path stops the run like any protection violation.
+   A failing formatter blocks the issue; the comment names the formatter. Its
+   output is kept as private evidence (format-N-I.log), like check logs.
+   Checks and review see the formatted diff.
    The controller runs the configured checks. One check-failure repair is
    allowed; repeated failure blocks the issue. The repair receives at most
    10,000 characters of the failed check's log: failure summary lines

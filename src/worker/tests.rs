@@ -799,3 +799,92 @@ fn product_feature_map_can_change_without_modifying_validator() {
     fs::write(file, "Updated map\n").expect("map");
     assert!(fixture.worker().stage_and_guard(&fixture.work).is_ok());
 }
+
+/// Add a formatter that runs `script` through `sh -c` in the checkout. Each run
+/// also appends a line to `format-runs` beside the run record (outside the checkout).
+fn add_formatter(fixture: &mut Fixture, name: &str, paths: Value, script: &str) {
+    let counter = fixture.job.join("format-runs");
+    let script = format!("echo run >> '{}'; {script}", counter.display());
+    fixture.config.formatters = vec![
+        serde_json::from_value(json!({"name":name,"argv":["sh","-c",script],"paths":paths}))
+            .expect("formatter"),
+    ];
+}
+fn format_runs(fixture: &Fixture) -> usize {
+    fs::read_to_string(fixture.job.join("format-runs")).map_or(0, |text| text.lines().count())
+}
+
+#[test]
+fn formatter_runs_once_before_checks_and_its_output_is_checked() {
+    // The agent writes "wrong"; only the formatted "Hello" can pass the check.
+    let mut fixture = Fixture::new(Behavior::AlwaysFail);
+    add_formatter(
+        &mut fixture,
+        "fix",
+        json!(["*"]),
+        "printf 'Hello\\n' > hello.txt",
+    );
+    assert_eq!(fixture.execute().expect("run")["status"], "pr-created");
+    assert_eq!(format_runs(&fixture), 1);
+    assert_eq!(fixture.agent.calls.get(), 2, "no repair was needed");
+    assert!(fixture.job.join("format-1-0.log").exists());
+    assert!(
+        fixture
+            .runner
+            .run(Request::new(
+                "git",
+                &fixture.work,
+                ["show", "HEAD:hello.txt"]
+            ))
+            .expect("show")
+            .starts_with("Hello")
+    );
+}
+
+#[test]
+fn formatter_runs_again_after_repair() {
+    let mut fixture = Fixture::new(Behavior::Repair);
+    add_formatter(&mut fixture, "noop", json!(["*"]), "true");
+    assert!(fixture.execute().is_ok());
+    assert_eq!(fixture.agent.calls.get(), 3);
+    assert_eq!(format_runs(&fixture), 2);
+    assert!(fixture.job.join("format-2-0.log").exists());
+}
+
+#[test]
+fn formatter_skips_files_it_does_not_match() {
+    let mut fixture = Fixture::new(Behavior::Good);
+    add_formatter(
+        &mut fixture,
+        "rust only",
+        json!(["*.rs", "**/*.rs"]),
+        "true",
+    );
+    assert!(fixture.execute().is_ok());
+    assert_eq!(format_runs(&fixture), 0);
+}
+
+#[test]
+fn formatter_changing_protected_path_stops_before_review() {
+    let mut fixture = Fixture::new(Behavior::Good);
+    add_formatter(
+        &mut fixture,
+        "bad",
+        json!(["*"]),
+        "printf changed > AGENTS.md",
+    );
+    let error = fixture.execute().expect_err("protected");
+    assert!(error.public_message().contains("AGENTS.md"));
+    assert_eq!(fixture.agent.calls.get(), 1, "stopped before review");
+    assert!(!fixture.published());
+}
+
+#[test]
+fn failed_formatter_stops_unpublished_and_names_itself() {
+    let mut fixture = Fixture::new(Behavior::Good);
+    add_formatter(&mut fixture, "rustfmt-test", json!(["*"]), "exit 3");
+    let error = fixture.execute().expect_err("formatter failure");
+    assert!(error.public_message().contains("rustfmt-test"));
+    assert_eq!(fixture.agent.calls.get(), 1);
+    assert!(!fixture.published());
+}

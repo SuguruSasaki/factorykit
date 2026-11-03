@@ -77,6 +77,22 @@ pub(crate) struct Check {
     pub timeout_seconds: u64,
 }
 
+fn formatter_timeout() -> u64 {
+    300
+}
+
+/// Run by the controller to rewrite files; validated by the same rules as a [`Check`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Formatter {
+    pub name: String,
+    pub argv: Vec<String>,
+    #[serde(default = "all_paths")]
+    pub paths: Vec<String>,
+    #[serde(default = "formatter_timeout")]
+    pub timeout_seconds: u64,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
@@ -90,6 +106,8 @@ pub(crate) struct Config {
     #[serde(default)]
     pub hooks_path: Option<String>,
     pub checks: Vec<Check>,
+    #[serde(default)]
+    pub formatters: Vec<Formatter>,
     #[serde(default)]
     pub protected_paths: Vec<String>,
 }
@@ -113,16 +131,25 @@ impl Config {
         if self.checks.is_empty() {
             return Err(Error::blocked("Configure project checks before running."));
         }
-        for check in &self.checks {
-            if check.name.trim().is_empty()
-                || check.argv.is_empty()
-                || check.argv.iter().any(|s| s.is_empty())
-                || check.paths.is_empty()
-                || check.paths.iter().any(|s| s.is_empty() || s.len() > 1024)
-                || !(1..=1800).contains(&check.timeout_seconds)
+        let commands = self
+            .checks
+            .iter()
+            .map(|c| (&c.name, &c.argv, &c.paths, c.timeout_seconds))
+            .chain(
+                self.formatters
+                    .iter()
+                    .map(|f| (&f.name, &f.argv, &f.paths, f.timeout_seconds)),
+            );
+        for (name, argv, paths, timeout_seconds) in commands {
+            if name.trim().is_empty()
+                || argv.is_empty()
+                || argv.iter().any(|s| s.is_empty())
+                || paths.is_empty()
+                || paths.iter().any(|s| s.is_empty() || s.len() > 1024)
+                || !(1..=1800).contains(&timeout_seconds)
             {
                 return Err(Error::blocked(
-                    "A check needs a name, argv, paths, and a bounded timeout.",
+                    "A check or formatter needs a name, argv, paths, and a bounded timeout.",
                 ));
             }
         }
@@ -319,6 +346,37 @@ mod tests {
         assert!(matches("src/**", "src/日本語/file.rs"));
         assert!(matches("*.sh", "scripts/check.sh"));
         assert!(!matches("src/**", "docs/src.md"));
+    }
+    fn config_with_formatters(formatters: serde_json::Value) -> Result<Config> {
+        let config: Config = serde_json::from_value(serde_json::json!({
+            "repository":"owner/repo",
+            "checks":[{"name":"c","argv":["true"]}],
+            "formatters":formatters
+        }))
+        .expect("shape");
+        config.validate().map(|()| config)
+    }
+    #[test]
+    fn formatters_are_optional_and_validated_like_checks() {
+        let config = config_with_formatters(serde_json::json!([])).expect("empty");
+        assert!(config.formatters.is_empty());
+        let config = config_with_formatters(serde_json::json!([{"name":"f","argv":["fmt"]}]))
+            .expect("defaults");
+        assert_eq!(config.formatters[0].paths, vec!["*".to_owned()]);
+        assert_eq!(config.formatters[0].timeout_seconds, 300);
+        let invalid = [
+            serde_json::json!([{"name":"f","argv":[]}]),
+            serde_json::json!([{"name":" ","argv":["fmt"]}]),
+            serde_json::json!([{"name":"f","argv":["fmt"],"paths":[]}]),
+            serde_json::json!([{"name":"f","argv":["fmt"],"timeout_seconds":0}]),
+            serde_json::json!([{"name":"f","argv":["fmt"],"timeout_seconds":1801}]),
+        ];
+        for formatters in invalid {
+            assert!(
+                config_with_formatters(formatters.clone()).is_err(),
+                "{formatters}"
+            );
+        }
     }
     fn with_body(body: &str) -> Issue {
         serde_json::from_value(serde_json::json!({

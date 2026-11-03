@@ -4,5 +4,12 @@
   "model": "sonnet",
   "review_model": "sonnet",
   "checks": [],
+  "formatters": [
+    {
+      "name": "rustfmt",
+      "argv": ["cargo", "fmt", "--all"],
+      "paths": ["*.rs", "**/*.rs"]
+    }
+  ],
   "protected_paths": []
 }

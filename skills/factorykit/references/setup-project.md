@@ -62,6 +62,9 @@ it is a tracking issue, not a task.
 If enabling the optional Mac worker, use [worker.example.json](../assets/worker.example.json)
 as the product's .factorykit/worker.json and configure actual argv-based checks.
 The empty check list is deliberately invalid until project checks are chosen.
+Add `formatters` (for example the included `cargo fmt --all` entry) so the
+controller formats the code before checks; the AI is never given a shell for
+this. Remove the entry if the product does not use it.
 Commands, protected validator paths, and live-check requirements belong to the
 product. Follow the [worker guide](../../../docs/issue-worker.md) for a source
 checkout, or obtain that guide from the matching repository release.
